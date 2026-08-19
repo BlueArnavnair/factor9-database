@@ -11,6 +11,33 @@ def load_data():
     df = pd.read_csv("factor9_variants.csv")
     return df
 
+# --- DATA LOADING & CLEANING ---
+@st.cache_data
+def load_data():
+    df = pd.read_csv("factor9_variants.csv")
+    
+    # Helper to convert raw numerical activity values into clinical categories
+    def clean_severity(val):
+        if pd.isna(val) or str(val).strip() == '' or str(val) == 'nan':
+            return 'Unclassified'
+        
+        # Try parsing numeric values (e.g., activity percentage)
+        try:
+            num = float(val)
+            if num < 1.0:
+                return 'Severe (<1%)'
+            elif 1.0 <= num <= 5.0:
+                return 'Moderate (1-5%)'
+            elif num > 5.0:
+                return 'Mild (>5%)'
+        except ValueError:
+            pass
+            
+        return str(val).strip().capitalize()
+
+    df['Clinical_Severity'] = df['Clinical_Severity'].apply(clean_severity)
+    return df
+
 df = load_data()
 
 # --- HEADER ---
