@@ -1,4 +1,4 @@
 streamlit
 pandas
 py3Dmol
-stdmol
+stmol
