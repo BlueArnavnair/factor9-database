@@ -1,0 +1,4 @@
+streamlit
+pandas
+py3Dmol
+st3dmol
