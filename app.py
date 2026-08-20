@@ -6,56 +6,40 @@ import plotly.express as px
 
 st.set_page_config(page_title="Factor IX Mutation Structural Database", layout="wide")
 
-# --- DATA LOADING & CLEANING ---
+VALID_DOMAINS = [
+    "Gla Domain", 
+    "EGF1 Domain", 
+    "EGF2 Domain", 
+    "Activation Peptide", 
+    "Catalytic Serine Protease Domain"
+]
+
 @st.cache_data
 def load_data():
     df = pd.read_csv("factor9_variants.csv")
     
-    # Standardize column searching
-    cols = df.columns.tolist()
+    # Use Cleaned Domain if available
+    if 'Cleaned_Domain' in df.columns:
+        df['Domain'] = df['Cleaned_Domain']
     
     def clean_severity(val):
         s = str(val).strip().lower()
         if pd.isna(val) or s in ['nan', '', 'unclassified', 'n/a']:
             return 'Unclassified'
-        if 'severe' in s:
-            return 'Severe'
-        if 'moderate' in s:
-            return 'Moderate'
-        if 'mild' in s:
-            return 'Mild'
-        try:
-            num = float(val)
-            if num < 1.0: return 'Severe'
-            elif 1.0 <= num <= 5.0: return 'Moderate'
-            elif num > 5.0: return 'Mild'
-        except ValueError:
-            pass
-        return str(val).strip().capitalize()
+        if 'severe' in s: return 'Severe'
+        if 'moderate' in s: return 'Moderate'
+        if 'mild' in s: return 'Mild'
+        return 'Unclassified'
 
-    # Domain cleaning
-    domain_col = next((c for c in cols if 'domain' in c.lower()), None)
-    if domain_col:
-        df['Domain'] = df[domain_col].fillna('Unassigned Region')
-    else:
-        df['Domain'] = 'Unassigned Region'
-
-    # Severity cleaning
-    sev_col = next((c for c in cols if 'sever' in c.lower() or 'clinical' in c.lower()), None)
-    if sev_col:
-        df['Severity_Clean'] = df[sev_col].apply(clean_severity)
-    else:
-        df['Severity_Clean'] = 'Unclassified'
-
+    df['Severity_Clean'] = df['Clinical_Severity'].apply(clean_severity)
     return df
 
 df = load_data()
 
-# --- TOP NAVIGATION TABS ---
 nav_landing, nav_explorer = st.tabs(["🏠 Overview & Domain Insights", "🔬 Variant Explorer"])
 
 # ==========================================
-# PAGE 1: LANDING PAGE & DOMAIN INSIGHTS
+# PAGE 1: LANDING PAGE & CLEAN CHARTS
 # ==========================================
 with nav_landing:
     st.title("🧬 Factor IX Structural Mutation Portal")
@@ -71,9 +55,12 @@ with nav_landing:
     
     col_chart1, col_chart2 = st.columns(2)
     
+    # Clean domain counts filtering out noise
+    chart_data = df[df['Domain'].isin(VALID_DOMAINS)]
+    
     with col_chart1:
         st.subheader("📊 Mutation Distribution across Factor IX Domains")
-        domain_counts = df['Domain'].value_counts().reset_index()
+        domain_counts = chart_data['Domain'].value_counts().reset_index()
         domain_counts.columns = ['Domain', 'Count']
         
         fig_pie = px.pie(
@@ -81,39 +68,33 @@ with nav_landing:
             names='Domain', 
             values='Count',
             hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Pastel
+            color_discrete_sequence=px.colors.qualitative.Set2
         )
         fig_pie.update_layout(margin=dict(t=20, b=20, l=10, r=10))
         st.plotly_chart(fig_pie, use_container_width=True)
         
     with col_chart2:
         st.subheader("⚡ Severity Profiles by Protein Region")
-        chart_df = df[df['Severity_Clean'].isin(['Severe', 'Moderate', 'Mild'])]
+        sev_chart_df = chart_data[chart_data['Severity_Clean'].isin(['Severe', 'Moderate', 'Mild'])]
         
-        if not chart_df.empty:
-            fig_bar = px.histogram(
-                chart_df,
-                x='Domain',
-                color='Severity_Clean',
-                barmode='stack',
-                color_discrete_map={'Severe': '#EF553B', 'Moderate': '#FECB52', 'Mild': '#00CC96'},
-                category_orders={'Severity_Clean': ['Severe', 'Moderate', 'Mild']}
-            )
-            fig_bar.update_layout(
-                xaxis_title="Protein Domain", 
-                yaxis_title="Number of Variants",
-                legend_title="Severity",
-                margin=dict(t=20, b=20, l=10, r=10)
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.write("No severity records available for bar chart display.")
+        fig_bar = px.histogram(
+            sev_chart_df,
+            x='Domain',
+            color='Severity_Clean',
+            barmode='stack',
+            color_discrete_map={'Severe': '#EF553B', 'Moderate': '#FECB52', 'Mild': '#00CC96'},
+            category_orders={'Severity_Clean': ['Severe', 'Moderate', 'Mild']}
+        )
+        fig_bar.update_layout(
+            xaxis_title="Protein Domain", 
+            yaxis_title="Number of Variants",
+            legend_title="Severity",
+            margin=dict(t=20, b=20, l=10, r=10)
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
 
     st.divider()
-    
     st.subheader("🔮 Full Structural Architecture of Human Factor IX")
-    st.caption("Complete 3D tertiary fold showing domain organization and catalytic machinery.")
-    
     view_main = py3Dmol.view(query='pdb:1CFH')
     view_main.setStyle({'cartoon': {'color': 'spectrum'}})
     view_main.addStyle({'resi': '411'}, {'stick': {'color': 'yellow', 'radius': 0.3}})
@@ -129,29 +110,25 @@ with nav_explorer:
     only_missense = st.sidebar.checkbox("Show Missense Variants Only", value=True)
     filtered_df = df.copy()
 
-    # Safely create display labels across variable CSV columns
     def make_label(row):
-        for col_name in ['HGVS_p', 'Mutation', 'Variant', 'Change', 'p_change']:
-            if col_name in row and pd.notnull(row[col_name]) and str(row[col_name]).strip() not in ['', 'nan', 'N/A']:
-                res = str(row.get('Residue_ID', '')).strip()
-                return f"{row[col_name]} (Residue {res})" if res else str(row[col_name])
-        
+        hgvs = str(row.get('HGVS_p', '')).strip()
+        mut = str(row.get('Mutation', '')).strip()
         res = str(row.get('Residue_ID', '')).strip()
-        return f"Residue {res}" if res else "Unknown Variant"
+        
+        lbl = hgvs if hgvs and hgvs not in ['-', 'nan', 'N/A'] else mut
+        return f"{lbl} (Residue {res})" if res else lbl
 
     filtered_df['Display_Label'] = filtered_df.apply(make_label, axis=1)
 
     if only_missense:
-        filtered_df = filtered_df[
-            filtered_df['Display_Label'].str.contains('p\.|>|Ala|Arg|Asn|Asp|Cys|Gln|Glu|Gly|His|Ile|Leu|Lys|Met|Phe|Pro|Ser|Thr|Trp|Tyr|Val', regex=True, na=False)
-        ]
+        filtered_df = filtered_df[~filtered_df['Display_Label'].str.contains('\*|del|ins|dup|fs|splice', case=False, na=False)]
 
-    domains = ["All"] + sorted([d for d in filtered_df['Domain'].dropna().unique() if str(d).strip() != ''])
-    selected_domain = st.sidebar.selectbox("Filter by Domain", domains)
+    # Clean domain selection dropdown
+    selected_domain = st.sidebar.selectbox("Filter by Domain", ["All"] + VALID_DOMAINS)
     if selected_domain != "All":
         filtered_df = filtered_df[filtered_df['Domain'] == selected_domain]
 
-    severities = ["All"] + sorted([s for s in filtered_df['Severity_Clean'].dropna().unique() if str(s).strip() != ''])
+    severities = ["All", "Severe", "Moderate", "Mild", "Unclassified"]
     selected_severity = st.sidebar.selectbox("Filter by Severity", severities)
     if selected_severity != "All":
         filtered_df = filtered_df[filtered_df['Severity_Clean'] == selected_severity]
@@ -183,7 +160,7 @@ with nav_explorer:
             m3.metric("Dist. to Active Site (Ser411)", f"{dist_val} Å" if pd.notnull(dist_val) and str(dist_val) != 'N/A' else "N/A")
             m4.metric("Disulfide Disruption", str(variant_row.get('Disulfide_Disrupt', 'N/A')))
 
-            st.markdown(f"**Domain:** {variant_row.get('Domain', 'N/A')}")
+            st.markdown(f"**Domain:** `{variant_row.get('Domain', 'Unassigned Region')}`")
             
         with col_right:
             xyzview = py3Dmol.view(query='pdb:1CFH')
@@ -204,7 +181,7 @@ with nav_explorer:
         st.markdown(f"### Mechanism Breakdown for `{selected_label}`")
         
         col_a, col_b = st.columns(2)
-        col_a.markdown(f"**Domain:** `{variant_row.get('Domain', 'N/A')}`")
+        col_a.markdown(f"**Domain:** `{variant_row.get('Domain', 'Unassigned Region')}`")
         col_b.markdown(f"**Severity:** `{variant_row.get('Severity_Clean', 'N/A')}`")
         
         st.divider()
