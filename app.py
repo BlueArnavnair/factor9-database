@@ -11,33 +11,6 @@ def load_data():
     df = pd.read_csv("factor9_variants.csv")
     return df
 
-# --- DATA LOADING & CLEANING ---
-@st.cache_data
-def load_data():
-    df = pd.read_csv("factor9_variants.csv")
-    
-    # Helper to convert raw numerical activity values into clinical categories
-    def clean_severity(val):
-        if pd.isna(val) or str(val).strip() == '' or str(val) == 'nan':
-            return 'Unclassified'
-        
-        # Try parsing numeric values (e.g., activity percentage)
-        try:
-            num = float(val)
-            if num < 1.0:
-                return 'Severe (<1%)'
-            elif 1.0 <= num <= 5.0:
-                return 'Moderate (1-5%)'
-            elif num > 5.0:
-                return 'Mild (>5%)'
-        except ValueError:
-            pass
-            
-        return str(val).strip().capitalize()
-
-    df['Clinical_Severity'] = df['Clinical_Severity'].apply(clean_severity)
-    return df
-
 df = load_data()
 
 # --- HEADER ---
@@ -47,13 +20,11 @@ st.markdown("Interactive structure-function mapping of *F9* mutations in Hemophi
 # --- SIDEBAR FILTERS ---
 st.sidebar.header("🔍 Search & Filter Variants")
 
-# Toggle to keep dropdown clean
 only_missense = st.sidebar.checkbox("Show Missense Variants Only", value=True)
-
 filtered_df = df.copy()
 
 if only_missense:
-    filtered_df = filtered_df[filtered_df['HGVS_p'].str.startswith('p.', na=False)]
+    filtered_df = filtered_df[filtered_df['HGVS_p'].astype(str).str.startswith('p.', na=False)]
 
 # Domain Filter
 domains = ["All"] + sorted([d for d in filtered_df['Domain'].dropna().unique() if str(d).strip() != ''])
@@ -78,18 +49,17 @@ def make_label(row):
 
 filtered_df['Display_Label'] = filtered_df.apply(make_label, axis=1)
 
-# Searchable Variant Selection
 variant_list = filtered_df['Display_Label'].unique().tolist()
 
 if not variant_list:
     st.warning("No variants match the selected filters.")
     st.stop()
 
-selected_label = st.sidebar.selectbox("Type to Search Variant (e.g., p.Arg or Residue #):", variant_list)
+selected_label = st.sidebar.selectbox("Type to Search Variant (e.g., p.Val92Ala or Residue 92):", variant_list)
 variant_row = filtered_df[filtered_df['Display_Label'] == selected_label].iloc[0]
 
 # --- MAIN WORKSPACE TABS ---
-tab1, tab2, tab3 = st.tabs(["🔬 3D Spatial Viewer", "📊 Variant Metrics", "📋 Full Dataset Overview"])
+tab1, tab2, tab3 = st.tabs(["🔬 3D Spatial Viewer", "📊 Structural Mechanism Cards", "📋 Full Dataset Overview"])
 
 with tab1:
     col_left, col_right = st.columns([1, 1.2])
@@ -108,19 +78,14 @@ with tab1:
         m4.metric("Disulfide Disruption", str(variant_row.get('Disulfide_Disrupt', 'N/A')))
 
         st.markdown(f"**Domain:** {variant_row.get('Domain', 'N/A')}")
-        st.markdown(f"**Wild Type:** `{variant_row.get('Wild_Type', 'N/A')}` $\rightarrow$ **Mutant:** `{variant_row.get('Mutant', 'N/A')}`")
         
     with col_right:
         st.subheader("Interactive 3D Protein Structure")
         
-        # 3Dmol Viewer setup
         xyzview = py3Dmol.view(query='pdb:1CFH')
         xyzview.setStyle({'cartoon': {'color': 'spectrum'}})
-        
-        # Highlight catalytic active site (Ser411) in yellow
         xyzview.addStyle({'resi': '411'}, {'stick': {'color': 'yellow', 'radius': 0.3}})
         
-        # Auto-focus and highlight target mutated residue in bright red
         if pd.notnull(res_val) and res_val > 0:
             resi_str = str(int(res_val))
             xyzview.addStyle({'resi': resi_str}, {'stick': {'color': 'red', 'radius': 0.4}})
@@ -132,11 +97,20 @@ with tab1:
         st.caption("🔴 Red sticks = Selected Mutation Site | 🟡 Yellow sticks = Catalytic Active Site (Ser411)")
 
 with tab2:
-    st.subheader("Detailed Structural Mechanism")
-    impact = variant_row.get('Structural_Impact_Summary', 'No detailed structural perturbation summary available for this position.')
-    st.info(f"**Impact Summary:**\n\n{impact}")
+    st.subheader(f"Mechanism Breakdown for {variant_row.get('HGVS_p', 'N/A')}")
+    
+    col_a, col_b = st.columns(2)
+    col_a.markdown(f"**Domain:** `{variant_row.get('Domain', 'N/A')}`")
+    col_b.markdown(f"**Severity:** `{variant_row.get('Clinical_Severity', 'N/A')}`")
+    
+    st.divider()
+    
+    st.markdown("### 🔍 Observation")
+    st.info(variant_row.get('Observation', 'No observation generated.'))
+    
+    st.markdown("### ⚡ Structural Impact")
+    st.warning(variant_row.get('Structural_Impact', 'No impact generated.'))
 
 with tab3:
-    st.subheader("Filtered Dataset")
-    cols_to_show = [c for c in ['Residue_ID', 'HGVS_p', 'cDNA', 'Domain', 'Clinical_Severity'] if c in filtered_df.columns]
-    st.dataframe(filtered_df[cols_to_show], use_container_width=True)
+    st.subheader("Filtered Dataset Overview")
+    st.dataframe(filtered_df, use_container_width=True)
