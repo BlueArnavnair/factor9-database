@@ -1,5 +1,6 @@
+ipython_genutils
 streamlit
 pandas
 py3Dmol
 stmol
-ipython_genutils
+plotly
